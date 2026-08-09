@@ -33,6 +33,7 @@
 - `TEST_STRATEGY.md` — TDD pyramid, RED rules, contract/conformance and E2E.
 - `CI_CD.md` — quality gates and environments.
 - `ROADMAP.md` — phase ordering and exit criteria.
+- `PLAN_PHASE_0.md` — Phase 0 engineering foundation plan: tooling, shells, health, Supabase local, test/CI harness and acceptance criteria.
 - `DECISIONS.md` — frozen decisions.
 - `OPEN_QUESTIONS.md` — only legitimate stakeholder blockers.
 - `SOURCE_MAPPING.md` — mapping from the reference architecture/rules to this TypeScript/Supabase implementation.

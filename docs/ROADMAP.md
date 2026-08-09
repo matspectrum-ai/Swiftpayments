@@ -8,6 +8,8 @@ Deliver monorepo/tooling, app shells, strict TS, lint/format, Supabase local, he
 
 Exit: all shells build; test infrastructure works; no business feature implemented without RED.
 
+Execution plan, tooling decisions (ADR-012), behavior IDs and acceptance criteria: see `PLAN_PHASE_0.md`.
+
 ## Phase 1 — Identity, Tenant, RBAC
 
 Supabase Auth integration; Merchant/member; admin role assignments; tenant/RLS baseline; API key metadata/verifier model.
