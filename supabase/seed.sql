@@ -1,0 +1,2 @@
+-- FND-007: deterministic development seed data lives here.
+-- Phase 1 (identity/tenant) adds the first merchant/member seeds.

@@ -1,0 +1,34 @@
+# Supabase local development configuration (generated for Swiftpayments).
+# Managed by the Supabase CLI: https://supabase.com/docs/guides/local-development
+
+project_id = "swiftpayments"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+
+[realtime]
+enabled = true
