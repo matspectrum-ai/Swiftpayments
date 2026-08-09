@@ -1,75 +1,51 @@
 # Frozen Decisions
 
-Status values: `ACCEPTED`, `SUPERSEDED`, `PROPOSED`.
+Status: `ACCEPTED`, `SUPERSEDED`, `PROPOSED/BLOCKED`.
 
-## ADR-001 — Pix-only product
+## ADR-001 — Pix-only product — ACCEPTED
+Pix is sole payment rail. Pix-only does not exclude fees, split, provider subaccounts, settlement or ledger domains.
 
-**Status:** ACCEPTED
+## ADR-002 — TypeScript/Supabase stack — ACCEPTED
+Next.js/React/TS; Node/TS/Fastify; Supabase/PostgreSQL/Auth/RLS/Storage/Realtime/Queues/Cron.
 
-Pix is the sole payment method. No card or boleto code paths are permitted in v0.x without an explicit product RFC.
+## ADR-003 — Two API boundaries — ACCEPTED
+`platform-api` and `payment-api` separate deployables, shared PostgreSQL initially.
 
-## ADR-002 — TypeScript/Supabase stack
+## ADR-004 — Provider agnosticism — ACCEPTED
+FlevoPay/AkkadPag P0. Merchant contracts hide provider identity; same PixProvider/conformance.
 
-**Status:** ACCEPTED
+## ADR-005 — Async infrastructure — ACCEPTED
+Transactional outbox + pgmq; Realtime UX only; pg_cron scheduling.
 
-Next.js/React/TypeScript for web; Node.js/TypeScript/Fastify for APIs; Supabase/PostgreSQL/Auth/RLS/Storage/Realtime/Queues/Cron for platform services.
+## ADR-006 — Authentication — ACCEPTED
+Humans Supabase Auth. Merchant systems `sk_test_`/`sk_live_`. Admin role server-controlled.
 
-## ADR-003 — Two API boundaries
+## ADR-007 — KYC/live gate — ACCEPTED
+No live Payment before required compliance approval. Suspension blocks immediately.
 
-**Status:** ACCEPTED
+## ADR-008 — Money — ACCEPTED
+Integer centavos and integer bps; no floating point.
 
-Preserve the proven separation between platform/admin concerns and transaction processing: `platform-api` and `payment-api` are separate deployables. They share PostgreSQL initially to remain operationally light.
+## ADR-009 — Order vs Payment — ACCEPTED
+Checkout uses Order→Payment; API direct Payment; PaymentLink create != Payment.
 
-## ADR-004 — Provider agnosticism
+## ADR-010 — Provider create ambiguity — ACCEPTED
+Ambiguous create never blind-fallback/retry; reconciliation required.
 
-**Status:** ACCEPTED
+## ADR-011 — Settlement/custody activation — PROPOSED/BLOCKED
+Ledger/withdrawable balance/Pix-out/internal-ledger split execution require legal/commercial settlement model first.
 
-FlevoPay and AkkadPag are P0 providers and references. Merchant-facing contracts do not reveal provider identity. Both implement the same canonical `PixProvider` contract and conformance suite.
+## ADR-012 — Split Engine is P0 — ACCEPTED
+Split is a first-class Pix domain, not a deferred marketplace feature. Canonical rule/snapshot/allocation semantics exist independently of provider implementation.
 
-## ADR-005 — Async infrastructure
+## ADR-013 — Fee-before-split canonical economics — ACCEPTED
+`split_base = gross - platform_fee`. Provider cost is internal Swiftpay cost and does not silently reduce recipient entitlement. Changing this requires explicit ADR/API/accounting migration plan.
 
-**Status:** ACCEPTED
+## ADR-014 — Split arithmetic modes — ACCEPTED
+One rule version uses either percentage (sum exactly 10000 bps with deterministic remainder recipient) or fixed allocations plus exactly one remainder recipient. No implicit mixed mode.
 
-Use transactional outbox + `pgmq` instead of RabbitMQ/Kafka. Use Realtime for UX signals only. Use `pg_cron` for scheduling.
+## ADR-015 — Split execution strategy — ACCEPTED
+Prefer verified provider-native split where exact. Internal-ledger split is blocked by ADR-011. If no exact strategy is eligible, fail before provider create; never drop split.
 
-## ADR-006 — Human and machine authentication
-
-**Status:** ACCEPTED
-
-Human surfaces use Supabase Auth. Public merchant systems use Swiftpay API keys (`sk_test_`/`sk_live_`). Admin access requires internal role assignments beyond authentication.
-
-## ADR-007 — KYC/live gate
-
-**Status:** ACCEPTED
-
-A merchant cannot create live payments before required onboarding/KYC is approved by authorized Swiftpay staff. Suspension revokes live operational eligibility immediately.
-
-## ADR-008 — Money representation
-
-**Status:** ACCEPTED
-
-Amounts use integer centavos/minor units. Rates use integer basis points. No floating-point arithmetic is allowed for money or fee calculations.
-
-## ADR-009 — Order vs Payment
-
-**Status:** ACCEPTED
-
-Checkout/no-code flow uses `Order → Payment`. Public API flow creates `Payment` directly. Payment Link creation itself never creates a Payment.
-
-## ADR-010 — Provider create ambiguity
-
-**Status:** ACCEPTED
-
-An ambiguous provider create outcome never triggers blind fallback/retry. The payment enters an internal reconciliation-required path until the original provider outcome is known.
-
-## ADR-011 — Settlement/custody activation
-
-**Status:** PROPOSED / BLOCKED
-
-Ledger, merchant withdrawable balance and payout architecture is specified, but custody/payout activation requires the legal/commercial settlement model to be frozen first.
-
-## ADR-012 — Foundation tooling
-
-**Status:** ACCEPTED
-
-Package manager is **Bun** (workspaces, `packageManager` field, `bun.lockb`). Monorepo task orchestration is **Turborepo** (`turbo.json`). Lint/format is **ESLint (flat config + typescript-eslint) + Prettier**. The single-process preview targets **merchant-web** as the showcase surface; the root `dev` script serves it. All tools are stable/GA and introduced with justification per AGENTS.md §8. Execution plan: `PLAN_PHASE_0.md`.
+## ADR-016 — Public split input v0.x — ACCEPTED
+Public Payment API accepts optional preconfigured canonical `split_rule_id`; no provider recipient IDs or arbitrary bank-data inline split payloads.

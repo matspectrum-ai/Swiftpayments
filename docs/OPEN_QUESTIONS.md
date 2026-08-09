@@ -1,31 +1,33 @@
 # Open Questions / Stakeholder Blockers
 
-Agents may ask stakeholders about these items when implementation reaches the affected gate. Do not repeatedly ask about decisions already frozen in `DECISIONS.md`.
+Agents may ask only when implementation reaches the affected gate; do not repeat frozen decisions.
 
 ## BLOCKER-01 — AkkadPag field-level contract
-
-Need complete current documentation/fixtures for authentication, Pix creation, query, errors, webhook authentication and statuses before the AkkadPag adapter can move from contract tests RED to GREEN.
+Need current auth/Pix create/query/errors/webhook/status docs/fixtures before adapter GREEN.
 
 ## BLOCKER-02 — Settlement/custody model
-
-Define whether provider(s) settle directly to merchant, Swiftpay receives/redistributes funds, or a provider subaccount/split arrangement is used. This determines when ledger balance, reserve and payout domains become operationally P0.
+Define direct provider settlement vs Swiftpay custody/redistribution/provider subaccount model. Determines internal-ledger split, balances/reserves/Pix-out.
 
 ## BLOCKER-03 — Fee collection mechanics
-
-Fee calculation is specified independently; exact collection/retention mechanics depend on provider contracts and settlement model.
+Fee arithmetic is frozen; exact retention/collection mechanics depend on provider/settlement contracts.
 
 ## BLOCKER-04 — KYC automation level
-
-Manual review is allowed for initial delivery. Decide whether launch requires third-party OCR/document validation/liveness/biometric verification.
+Decide launch requirement for OCR/document validation/liveness/biometric vendor automation.
 
 ## BLOCKER-05 — PF/PJ release scope
-
-Architecture supports both KYC and KYB. Decide whether initial live onboarding is PF-only, PJ-only or both before implementing final required-field validation.
+Architecture supports KYC/KYB; final required fields depend on launch scope.
 
 ## BLOCKER-06 — Provider submerchant model
-
-Determine whether FlevoPay and/or AkkadPag require one external submerchant/account per Swiftpay merchant and what lifecycle/capabilities apply.
+Determine FlevoPay/AkkadPag external merchant/submerchant lifecycle requirements.
 
 ## BLOCKER-07 — Production hosting
+Choose final hosting after foundation benchmarks/constraints.
 
-Choose final hosting for the two Fastify services and three Next.js surfaces after foundation benchmarks and operational constraints are known.
+## BLOCKER-08 — FlevoPay native split capability
+Need documented contract + sanitized fixtures proving whether native Pix split exists, recipient/submerchant identifiers, fee semantics, limits, rounding and webhook/reconciliation evidence. Until then capability is false for routing.
+
+## BLOCKER-09 — AkkadPag native split capability
+Same evidence required as FlevoPay; no assumptions.
+
+## BLOCKER-10 — Split recipient compliance policy detail
+Core law is that live recipients must be eligible. Exact required KYC/KYB/contract relationship for a recipient depends on legal/settlement/provider structure and must be frozen before live recipient onboarding GREEN.

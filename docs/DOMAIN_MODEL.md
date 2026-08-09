@@ -3,10 +3,10 @@
 ## 1. Bounded contexts
 
 ### Identity & Access
-`UserIdentity`, `MerchantMembership`, `AdminRoleAssignment`, `ApiKey`, `TrustedDevice` (optional), `SecurityEvent`.
+`UserIdentity`, `MerchantMembership`, `AdminRoleAssignment`, `ApiKey`, `SecurityEvent`.
 
 ### Merchant & Compliance
-`Merchant`, `MerchantProfile`, `KycCase`, `KycPendingItem`, `KycDecision`, `RiskAssessment`, `ProviderMerchantAccount`.
+`Merchant`, `MerchantProfile`, `KycCase`, `KycPendingItem`, `KycDecision`, `RiskAssessment`, `ProviderMerchantAccount`, `SplitRecipientEligibility`.
 
 ### Catalog & Commerce
 `Product`, `Checkout`, `CheckoutProduct`, `PaymentLink`, `Order`, `OrderItem`, `CustomerSnapshot`.
@@ -15,126 +15,103 @@
 `Payment`, `PixDetails`, `ProviderAttempt`, `ProviderEvent`, `RoutingDecision`, `IdempotencyRecord`.
 
 ### Providers
-`Provider`, `ProviderConnection`, `ProviderCapability`, `ProviderMerchantAccount`, provider-specific adapter models.
+`Provider`, `ProviderConnection`, `ProviderCapability`, `ProviderMerchantAccount`, `ProviderSplitExecution`, provider adapter models.
 
 ### Pricing
 `PlatformFeeRule`, `MerchantFeeOverride`, `ProviderCostRule`, `FeeSnapshot`.
+
+### Split
+`SplitRecipient`, `SplitRule`, `SplitRuleRecipient`, `PaymentSplitSnapshot`, `PaymentSplitAllocation`, `SplitExecution`, `SplitReconciliation`.
 
 ### Events/Webhooks
 `DomainEvent`, `OutboxMessage`, `WebhookEndpoint`, `WebhookDelivery`, `ProviderWebhookLog`.
 
 ### Financial Integrity
-`LedgerAccount`, `LedgerEntry`, `ReconciliationRun`, `ReconciliationDifference`, `Payout` — architecture-ready; activation depends on custody/settlement ADR.
+`LedgerAccount`, `LedgerEntry`, `ReconciliationRun`, `ReconciliationDifference`, `Payout` — internal custody activation depends on settlement ADR.
 
 ### Operations
 `Notification`, `DashboardCache`, `AuditEvent`, `OperationalIncident`.
 
-### Extension domains (disabled by default)
-`MerchantIntegration`, `Referral`, `Ranking`, `Achievement`.
-
-## 2. Core aggregate ownership
+## 2. Aggregate ownership
 
 ### Merchant
-Owns operational eligibility, profile and high-level lifecycle. It does not own KYC evidence history; `KycCase` does.
-
-Invariants:
-- one merchant is a tenant boundary;
-- status and compliance status are distinct;
-- `active` alone is insufficient for live payment if compliance gate is invalid;
-- suspension blocks new live operations immediately.
+Tenant/operational lifecycle. Operational active != compliance approval. Suspension blocks live operations.
 
 ### KycCase
-Owns submitted identity/business evidence and review lifecycle.
-
-Invariants:
-- submitted evidence versions are auditable;
-- decisions are append-only history, not one mutable boolean;
-- rejection/needs-info requires reason metadata;
-- merchant cannot approve itself.
+Owns submitted evidence/review history. Decisions append-only; merchant cannot self-approve.
 
 ### Order
-Commercial context for hosted checkout.
-
-Owns:
-- product snapshots;
-- quantities;
-- customer snapshot;
-- checkout/payment-link origin;
-- total amount.
-
-Invariants:
-- API direct payment has no Order;
-- checkout-confirmed flow creates Order before Payment;
-- snapshot values do not change when Product later changes;
-- `Order.total_amount == Payment.amount` for linked order/payment.
+Owns commerce snapshot. API direct Payment has no Order. `Order.total_amount == Payment.amount` when linked.
 
 ### Payment
-Canonical financial payment aggregate.
-
-Owns:
-- merchant/environment/origin;
-- amount/currency;
-- canonical status;
-- Pix code/expiry metadata;
-- fee snapshot reference;
-- chosen routing result reference;
-- paid/expired/failed timestamps.
-
-Does **not** expose provider-specific fields publicly.
-
-### ProviderAttempt
-One concrete attempt against one provider.
-
-Owns provider request/outcome classification, provider IDs, latency, sanitized/raw-reference pointers and ambiguity state.
-
-### RoutingDecision
-Immutable explanation of provider eligibility/selection for a Payment command.
-
-### PaymentLink
-Reusable public configuration; not a Payment.
-
-Invariants:
-- creation does not create Payment;
-- start/confirm creates a new Order/Payment according to session/lifetime rules;
-- unlimited links can create multiple sequential payments;
-- lifetime state is independent from current Payment state.
+Canonical Pix aggregate. Owns merchant/environment/origin, gross amount, canonical status, Pix metadata, `fee_snapshot_id`, `split_snapshot_id?`, routing result and timestamps. Public model never exposes provider-specific execution.
 
 ### FeeSnapshot
-Immutable financial calculation applied to a Payment.
+Immutable price/cost facts applied to Payment.
 
-Contains gross, platform fee, provider cost if known, merchant economic net, platform economic margin and IDs/versions of applied rules.
+### SplitRule
+Versioned reusable allocation policy belonging to one merchant/environment. It references pre-registered eligible recipients, not provider-specific recipient IDs.
 
-## 3. Provider abstraction
+A rule is mutable only by creating a new version/effective period; historical Payments never point to rewritten economics.
 
-Canonical domain knows `ProviderId` only in internal operational objects, never provider payload types.
+### SplitRecipient
+Canonical beneficiary identity recognized by Swiftpay. May represent merchant itself or an approved recipient/submerchant relationship. Provider mappings live separately.
 
-A provider adapter maps external request/response/webhook/status into canonical contracts.
+### PaymentSplitSnapshot
+Immutable allocation plan frozen for one Payment after fee resolution and before provider create transmission.
 
-## 4. Environment
+Contains:
+- gross amount;
+- platform fee;
+- `splittable_amount_minor`;
+- calculation mode/version;
+- rule/version reference;
+- exact allocation per canonical recipient;
+- rounding remainder assignment;
+- execution strategy intent.
 
-Commercial environments are `test` and `live`. Deployment environments (`local`, `staging`, `production`) are separate concepts.
+Invariant: allocation sum equals `splittable_amount_minor` exactly.
 
-Every payment, API key, provider connection, routing decision, webhook endpoint, outbox message and async command is environment-scoped.
+### SplitExecution
+Records how the canonical snapshot was executed: `native_provider` or `internal_ledger`. Does not redefine economic entitlement.
 
-## 5. Provider merchant/subaccount
+### ProviderAttempt
+One concrete provider operation. Owns provider IDs, request/outcome class, latency, raw refs and ambiguity.
 
-Some providers may require external merchant/submerchant onboarding. Model this independently:
+### RoutingDecision
+Immutable provider eligibility/selection explanation; split compatibility is an eligibility input.
 
-```yaml
-ProviderMerchantAccount:
-  merchant_id: MerchantId
-  provider_id: ProviderId
-  status: not_required | pending | under_review | active | rejected | suspended
-  external_id: string?
-  capabilities: []
+### PaymentLink
+Reusable public config, never a Payment. May reference a SplitRule version/config that is resolved/snapshotted only when child Payment is created.
+
+## 3. Split arithmetic modes
+
+One SplitRule uses one mode:
+
+- `percentage`: recipient bps sum exactly `10000`; allocation uses integer floor, then deterministic remainder to designated remainder recipient;
+- `fixed`: fixed allocations are non-negative and total <= splittable amount; exactly one remainder recipient receives residual.
+
+No mixed implicit arithmetic in one rule version. New arithmetic requires versioned contract/ADR.
+
+## 4. Fee vs split
+
+Canonical order:
+
+```text
+gross_amount
+  - platform_fee
+  = splittable_amount
+  → split allocations
 ```
 
-Router eligibility can require `active` when provider capability declares external onboarding mandatory.
+`provider_cost` is an internal Swiftpay cost affecting margin, not recipient entitlement, unless a future explicit pricing ADR changes merchant economics.
 
-## 6. Money
+## 5. Provider abstraction
 
-`MoneyMinor = int64-like integer in BRL centavos`.
+Canonical recipients/allocations never store provider-specific submerchant IDs in public/domain contracts. Provider mapping translates canonical recipient to provider recipient/subaccount identifiers.
 
-Percentages: integer basis points (`100 = 1%`).
+## 6. Environment and money
 
-No float/decimal sent through JSON for canonical amounts.
+Commercial environments: `test|live`. Deployment environment is separate. Every Payment, rule, recipient eligibility, provider connection, routing/split decision, webhook/outbox async command is environment-scoped.
+
+Money = integer BRL centavos. Percentage = integer bps. No floating-point canonical arithmetic.

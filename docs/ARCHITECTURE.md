@@ -1,144 +1,113 @@
 # System Architecture
 
-## 1. Architectural style
+## 1. Style
 
-A **lightweight modular platform with two API deployables** and shared PostgreSQL infrastructure.
+Lightweight modular platform with two API deployables and shared PostgreSQL infrastructure. Preserve domain depth while avoiding unnecessary infrastructure.
 
-The two API boundary is preserved from the reference system because transaction/provider processing has different reliability/security concerns from merchant/admin workflows. We intentionally do **not** split every bounded context into a service.
-
-## 2. Logical topology
+## 2. Topology
 
 ```text
-                  ┌──────────────────┐
-                  │ merchant-web     │ Next.js
-                  └────────┬─────────┘
-                           │
-                  ┌────────▼─────────┐
-                  │ platform-api     │ Fastify
-                  │ merchant/admin   │
-                  │ KYC/catalog      │
-                  └──────┬───────────┘
-                         │
-        ┌────────────────┼────────────────┐
-        │                │                │
-┌───────▼──────┐ ┌──────▼───────┐ ┌─────▼─────────┐
-│ PostgreSQL   │ │ Supabase Auth │ │ Storage       │
-│ + RLS        │ │ human identity│ │ private/public│
-└──────┬───────┘ └───────────────┘ └───────────────┘
-       │
-       │ shared canonical data/outbox/pgmq
-       │
-┌──────▼──────────┐      ┌──────────────────┐
-│ payment-api     │◄────►│ checkout-web     │ Next.js
-│ public API      │      └──────────────────┘
-│ Pix core/router │
-│ provider ingress│
-└──────┬──────────┘
-       │
-       ▼
-┌──────────────┐
-│ Pix Router   │
-└───┬──────┬───┘
-    ▼      ▼
- Flevo   Akkad
+merchant-web ───────┐
+admin-web ──────────┼──► platform-api ─────┐
+checkout-web ───────┘                      │
+                                          ▼
+                              PostgreSQL / Supabase
+                                 Auth / RLS / Storage
+                                 Outbox / pgmq / cron
+                                          ▲
+                                          │
+Public developer ─────────────► payment-api
+                                  │
+                                  ├─ Payment Domain
+                                  ├─ Fee Engine
+                                  ├─ Split Engine
+                                  ├─ Routing Engine
+                                  └─ Provider Contract
+                                      ├─ FlevoPay
+                                      └─ AkkadPag
 ```
 
-`admin-web` uses `platform-api` for admin/compliance operations. It can read privileged payment operational views through platform-safe internal application services/queries, never by browser service-role credentials.
+`admin-web` never receives service-role credentials. Privileged payment views pass through authorized server application services.
 
 ## 3. Deployables
 
 ### `apps/merchant-web`
-Merchant dashboard; no privileged secrets; browser uses Supabase Auth and platform API.
+Merchant dashboard: KYC, products, checkouts/links, payments, split rules/recipients, API keys/webhooks and fee visibility.
 
 ### `apps/admin-web`
-Internal owners/compliance/ops. Separate authorization surface from merchant UI.
+Internal compliance/ops/finance: merchants, recipients, fees, split execution/reconciliation, providers, routing, audit.
 
 ### `apps/checkout-web`
-Public hosted buyer flow. Reads public checkout config; starts payment through controlled public/internal endpoint; Realtime may update UX but canonical status comes from API/database.
+Public hosted Pix buyer flow. Starts canonical Payment; Realtime only refreshes UX.
 
 ### `apps/platform-api`
-Owns:
-- merchant/member lifecycle;
-- human session authorization integration;
-- KYC/KYB/compliance workflow;
-- admin/RBAC;
-- products, orders config, checkouts and payment links config;
-- provider configuration/readiness metadata;
-- fee/rate-limit/settings configuration;
-- dashboard query/cache orchestration;
-- storage authorization;
-- internal audit views.
+Owns merchant/member lifecycle, KYC/KYB, admin/RBAC, products/orders config/checkouts/links, split-rule/recipient configuration, provider readiness/config, fee/settings/rate-limit config, storage authorization, audit/read models.
 
 ### `apps/payment-api`
-Owns:
-- machine/API-key authentication;
-- public Pix API;
-- payment aggregate/state transitions;
-- idempotency;
-- fee snapshot application;
-- provider eligibility/routing;
-- FlevoPay/AkkadPag adapters;
-- provider webhook ingress/auth/normalization;
-- merchant event/outbox/webhook delivery;
-- payment reconciliation jobs;
-- test simulation endpoints guarded by environment.
+Owns API-key auth, public Pix API, Payment state/idempotency, fee snapshot, split snapshot, routing, provider adapters/webhooks, outbox/merchant webhooks, provider/split reconciliation and test simulation.
 
 ## 4. Shared packages
 
 ```text
 packages/
-  domain/          # pure canonical domain, state/invariants
-  contracts/       # public/internal schemas and shared types
-  db/              # SQL/repositories/query helpers
-  providers/       # provider contract + adapters
-  security/        # authz/crypto/redaction helpers
-  observability/   # logging/metrics/tracing primitives
-  ui/              # shared design system
-  testkit/         # fixtures/builders/provider simulator
-  config/          # typed environment/config parsing
+  domain/          canonical aggregates/state/invariants
+  contracts/       public/internal runtime schemas
+  db/              SQL/repositories/query helpers
+  pricing/         fee calculations/rule resolution
+  split/           pure split calculation/contracts/policies
+  providers/       PixProvider contract + adapters
+  security/        authz/crypto/redaction
+  observability/   logs/metrics/tracing
+  ui/              shared design system
+  testkit/         fixtures/builders/provider simulator
+  config/          typed configuration
 ```
 
-Dependency direction:
-
-`apps → application/domain ports → infrastructure adapters`.
-
-Canonical domain packages must not import provider adapter packages or web frameworks.
+Direction: `apps → application/domain ports → infrastructure adapters`. Domain/pricing/split packages never import provider implementations or web frameworks.
 
 ## 5. Data and async
 
 - PostgreSQL is canonical state.
-- Supabase Auth is human identity.
-- RLS protects browser-facing tenant data.
-- Supabase Storage holds KYC/private files and public product assets.
-- Transactional outbox records domain events in the same DB transaction as state mutation.
-- `pgmq` delivers durable async jobs/events.
-- `pg_cron` schedules periodic work.
-- Supabase Realtime emits UX refresh signals only.
+- Supabase Auth = human identity.
+- RLS = tenant defense in depth.
+- Storage = KYC/private/public product assets.
+- Transactional outbox commits events atomically with state.
+- `pgmq` = durable async work.
+- `pg_cron` = schedules.
+- Realtime = UX signals only.
 
 No RabbitMQ/Kafka/Redis initially.
 
-## 6. Internal communication
+## 6. Payment creation transaction boundary
 
-Prefer shared canonical DB + outbox over synchronous service chaining. Use authenticated internal HTTP only when a synchronous command genuinely crosses the API boundary. Never expose internal endpoints publicly by convention alone; use network/access policy + service credential validation.
+Before any external provider create is sent, persist atomically enough to reconstruct intent:
 
-## 7. Configuration
+```text
+Payment
++ IdempotencyRecord
++ FeeSnapshot
++ PaymentSplitSnapshot (when split enabled)
++ RoutingDecision intent/attempt metadata
+```
 
-- non-secret platform/provider settings live in database configuration entities where runtime admin control is required;
-- secrets live in secret manager/Vault/environment references, not JSON configuration columns;
-- settings are resolved through explicit typed config services, not ad-hoc environment reads throughout code.
+The SplitSnapshot is immutable after provider transmission begins.
 
-## 8. Health
+## 7. Split execution strategies
 
-Each API exposes:
+Canonical Split Engine is provider-agnostic. Execution is selected by capability/policy:
 
-- `GET /health/live` — process alive, no dependency checks;
-- `GET /health/ready` — required dependencies ready;
-- `GET /health` — operational aggregate, may alias readiness.
+1. `native_provider` — provider receives canonical allocation mapped to its own recipient/submerchant identifiers;
+2. `internal_ledger` — Swiftpay settles allocations internally only after custody/settlement ADR is accepted;
+3. `unsupported` — split-enabled live Payment is rejected before provider create. Never silently remove split.
 
-## 9. Correlation
+## 8. Internal communication
 
-Incoming `X-Correlation-Id` is accepted if safe/valid; otherwise generate a sortable opaque ID. Propagate correlation through API logs, Payment, ProviderAttempt, outbox messages, provider logs and merchant webhook deliveries.
+Prefer canonical DB + outbox over synchronous chaining. Internal HTTP must be authenticated/network-restricted.
 
-## 10. Migration policy
+## 9. Configuration/secrets
 
-Migrations are forward-only and applied through controlled deploy/CI, not arbitrary request startup code. Application startup performs readiness checks but does not silently mutate production schema.
+Runtime admin-controlled non-secret settings may live in DB. Secrets use secret references/Vault/env, never plain JSON columns.
+
+## 10. Health/correlation/migrations
+
+Each API exposes `/health/live`, `/health/ready`, `/health`. Propagate safe `X-Correlation-Id` through Payment, SplitSnapshot, ProviderAttempt, outbox and webhooks. Production schema evolves through controlled forward migrations; startup does not silently rewrite schema.

@@ -1,27 +1,27 @@
-# Swiftpayments PRD — Pix-only Multi-Provider Platform
+# Swiftpayments PRD — Pix-only Multi-Provider Payment Platform
 
 ## 1. Product statement
 
-Swiftpayments is a Pix-only payment platform that gives merchants one stable integration and one operational dashboard while Swiftpay internally manages providers, routing, fees, compliance, reconciliation and delivery of payment events.
+Swiftpayments is a Pix-only payment platform giving merchants one stable integration and one operational dashboard while Swiftpay manages providers, routing, fees, split, compliance, reconciliation and payment-event delivery.
 
-Primary providers for v0.x: **FlevoPay** and **AkkadPag**.
+Primary providers v0.x: **FlevoPay** and **AkkadPag**.
 
 ## 2. Personas
 
 ### Merchant owner/operator
-Needs onboarding, KYC status, products, checkout/payment links, transaction visibility, API keys, webhooks, fees and support without seeing provider-specific complexity.
+Needs onboarding/KYC, products, checkout/payment links, transactions, split rules/recipients, API keys, webhooks and fees without provider complexity.
 
 ### Merchant developer
-Needs a small predictable API: create Pix, query payment, list/filter payments, receive signed webhooks, test safely and retry idempotently.
+Needs predictable Pix API, idempotency, optional preconfigured split, signed webhooks and test/live isolation.
 
 ### Buyer
-Needs a fast hosted Pix checkout with QR/copy-paste and reliable paid-state confirmation.
+Needs fast hosted Pix QR/copy-paste and reliable paid-state confirmation.
 
 ### Swiftpay owner/admin
-Needs full control over merchants, KYC approval, providers, routing, fees, transactions, provider attempts, webhooks, logs, reconciliation, platform settings and operational overrides.
+Needs merchant/KYC/provider/routing/fee/split/transaction/reconciliation/audit controls.
 
 ### Compliance/operations
-Needs review queues, documents, risk flags, approve/reject/needs-info/suspend actions and complete auditability.
+Needs review queues, documents, risk flags, recipient eligibility, approval/suspension and auditability.
 
 ## 3. Product surfaces
 
@@ -34,93 +34,81 @@ Needs review queues, documents, risk flags, approve/reject/needs-info/suspend ac
 
 ## 4. P0 capabilities
 
-- human signup/signin;
-- merchant creation and onboarding;
-- KYC/KYB data/document collection;
-- manual Swiftpay approval/rejection/needs-info/suspension;
-- test/live environments;
-- product catalog minimal enough for checkout;
-- checkout configuration;
-- reusable payment links;
-- direct API Pix payments without product/order requirement;
-- canonical Pix payment state;
-- FlevoPay and AkkadPag adapters;
-- provider routing and safe failover policy;
-- API keys and immediate revocation;
-- idempotent payment creation;
-- provider webhooks and canonical normalization;
-- signed merchant webhooks with retry/delivery history;
-- fee engine: platform price vs provider cost;
-- merchant/admin transaction views;
-- provider attempt/audit views in admin;
+- signup/signin, merchants/membership;
+- KYC/KYB and manual approval/rejection/needs-info/suspension;
+- test/live isolation;
+- products, checkouts, reusable payment links and Orders;
+- direct Pix API payments;
+- canonical Payment state;
+- FlevoPay + AkkadPag adapters;
+- safe routing/failover;
+- API keys + immediate revocation;
+- payment idempotency;
+- provider webhook normalization;
+- signed merchant webhooks/retry history;
+- Fee Engine: platform fee vs provider cost;
+- **Split Engine:** preconfigured split rules, eligible recipients, immutable payment split snapshots, provider-native execution where supported, reconciliation evidence;
+- merchant/admin transaction and split views;
 - private KYC storage;
-- dashboard KPIs with async cache refresh;
-- correlation IDs, health, metrics and runbooks;
+- dashboard KPIs;
+- correlation/health/metrics/runbooks;
 - reconciliation primitives.
 
 ## 5. Pix-only constraint
 
-There is no card or boleto product behavior. Do not introduce generic `PaymentMethod` branching unless it provides concrete Pix value. The canonical payment method is effectively constant `pix` in external contracts.
+Pix is the only payment rail. This does not remove financial-platform domains such as fees, split, provider subaccounts, settlement or ledger when commercially/legal required.
 
 ## 6. Primary flows
 
 ### No-code
-
-`signup → merchant onboarding → KYC → admin approval → product → checkout/payment link → buyer confirms → Order → Payment → Router → Provider → provider webhook → canonical paid → checkout/dashboard update`.
+`signup → onboarding/KYC → admin approval → product → optional split rule → checkout/link → buyer confirms → Order → Payment + fee/split snapshots → Router → Provider → webhook → canonical paid → reconciliation/event delivery`.
 
 ### Developer
+`approved merchant → key → POST /v1/payments + Idempotency-Key + optional split_rule_id → canonical Pix → signed webhook → GET payment`.
 
-`approved merchant → sk_test/sk_live → POST /v1/payments + Idempotency-Key → canonical Pix response → signed payment webhook → GET payment`.
-
-### Compliance
-
-`submitted KYC → automated/basic checks → review queue → approve | needs_information | reject → audit event → merchant operational gate`.
-
-### Provider operations
-
-`admin provider config → provider connection/credentials → readiness/health → router eligibility → attempt → raw webhook audit → normalization`.
+### Split
+`admin/merchant configures eligible recipients → create/version SplitRule → Payment creation resolves fee → freezes SplitSnapshot → router selects split-compatible provider → provider-native split OR approved ledger settlement strategy → reconcile expected vs executed allocations`.
 
 ## 7. Success criteria
 
-- Merchant never needs provider-specific integration knowledge.
-- Same public request/response semantics regardless of selected provider.
-- Same idempotency key and same payload never cause a second semantic payment.
-- Unknown/ambiguous provider create outcomes never trigger blind secondary creation.
-- Duplicate/out-of-order webhooks cannot regress terminal payment state.
+- Merchant never needs provider-specific knowledge.
+- Same public semantics regardless of provider.
+- Idempotent create cannot create second semantic Payment.
+- Ambiguous provider create cannot blind-fallback.
+- Duplicate/out-of-order webhooks cannot regress terminal state.
 - Unapproved/suspended merchant cannot process live.
-- Provider cost is never exposed to merchant.
-- Every privileged admin/compliance/fee/provider change is auditable.
-- Every critical behavior has traceable tests.
+- Provider cost is internal.
+- Fee and split are deterministic, versioned, auditable and immutable per Payment.
+- Sum of split allocations equals canonical splittable amount exactly.
+- Split is never silently discarded when provider changes/fallback occurs.
+- Every privileged KYC/fee/split/provider/routing change is audited.
 
 ## 8. Performance targets
 
-Targets are budgets to verify, not promises before benchmark:
-
-- indexed internal/public GET platform overhead p95 < 150 ms;
-- internal writes excluding provider I/O p95 < 200 ms;
-- create-payment Swiftpay overhead p95 < 100 ms excluding provider latency;
-- no N+1 on hot paths;
+Budgets to verify, not promises:
+- indexed GET platform overhead p95 <150ms;
+- internal write excluding provider I/O p95 <200ms;
+- create-payment Swiftpay overhead p95 <100ms excluding provider latency;
+- no N+1 hot paths;
 - provider latency measured independently.
 
 ## 9. Deferred but architecture-ready
 
-- custodial wallet/balance;
-- Pix-out merchant payout/cashout;
+- internal custodial wallet/balance if not required for split execution;
+- Pix-out payout/cashout when settlement model requires it;
 - reserves/compensation;
-- refunds;
-- referrals, rankings, achievements;
+- refund;
+- referrals/rankings/achievements;
 - tracking integrations;
-- advanced routing experiments/A-B/weights;
+- advanced ML routing;
 - automated KYC vendor integrations.
-
-Deferred means not required for first live vertical, not architecturally forbidden.
 
 ## 10. Explicit non-goals
 
 - card;
 - boleto;
-- subscriptions;
-- marketplace split/coproductors;
+- subscriptions outside Pix scope;
+- marketplace discovery/storefront ecosystem (the Split Engine itself is P0);
 - hidden financial behavior;
 - provider details in merchant contracts;
 - infrastructure-heavy microservices.

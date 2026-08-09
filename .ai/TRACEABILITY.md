@@ -1,6 +1,6 @@
 # Traceability Standard
 
-Every production behavior must be traceable from requirement to evidence.
+Every production behavior traces requirement → contract → RED test → implementation → operational evidence.
 
 ## ID namespaces
 
@@ -15,6 +15,7 @@ Every production behavior must be traceable from requirement to evidence.
 | `PROV` | provider contract/adapters |
 | `ROUTE` | routing |
 | `FEE` | pricing/provider cost |
+| `SPLIT` | split rules/recipients/snapshots/execution |
 | `LED` | ledger/settlement |
 | `REC` | reconciliation |
 | `WH` | webhooks/events |
@@ -22,19 +23,18 @@ Every production behavior must be traceable from requirement to evidence.
 | `OBS` | observability/operations |
 
 ## Required chain
+`Requirement ID → normative rule → schema/state/contract → RED test → implementation → telemetry/runbook when critical`.
 
-`Requirement ID → normative rule → contract/schema/state transition → RED test → implementation → telemetry/runbook when operationally critical`.
-
-## Example
+Example:
 
 ```text
-PAY-007
-Requirement: ambiguous create timeout cannot produce blind failover.
-Contract: ProviderCreateResult.kind = ambiguous.
-Test: payment-create.ambiguous-timeout.test.ts.
-Implementation: router stops and schedules reconciliation.
-Telemetry: provider_create_ambiguous_total.
-Runbook: reconcile ambiguous Pix create.
+SPLIT-011
+Requirement: provider fallback cannot alter split economics.
+Contract: PaymentSplitSnapshot is frozen before provider send.
+Test: routing.split-fallback-preserves-snapshot.test.ts.
+Implementation: router consumes immutable snapshot ID.
+Telemetry: split_provider_ineligible_total / split_reconciliation_required_total.
+Runbook: split execution mismatch / provider ambiguity.
 ```
 
-A requirement without test evidence is incomplete. A test without a named requirement should be treated as technical coverage, not acceptance evidence.
+A requirement without evidence is incomplete.

@@ -1,30 +1,17 @@
 # Pix Provider Contract
 
 ## 1. Goal
+FlevoPay, AkkadPag and future Pix providers are substitutable behind one canonical contract. Provider details remain inside adapters.
 
-FlevoPay, AkkadPag and future Pix providers must be substitutable behind one canonical contract. Provider-specific details remain inside adapters.
-
-## 2. Mandatory layering
-
-```text
-ProviderClient        HTTP transport only
-ProviderSchemas       external request/response/webhook runtime schemas
-ProviderParser        response/error extraction and provider aliases
-ProviderStatusMapper  provider status → canonical status
-ProviderAdapter       implements PixProvider and orchestration glue
-```
-
-No payment state machine inside HTTP client.
+## 2. Layering
+`ProviderClient (HTTP only) → ProviderSchemas → ProviderParser → ProviderStatusMapper → ProviderAdapter`.
 
 ## 3. Canonical port
-
-Conceptual TypeScript contract:
 
 ```ts
 interface PixProvider {
   readonly code: ProviderCode;
   readonly capabilities: PixProviderCapabilities;
-
   createPayment(input: ProviderCreatePaymentInput): Promise<ProviderCreatePaymentResult>;
   getPayment(input: ProviderGetPaymentInput): Promise<ProviderGetPaymentResult>;
   authenticateWebhook(input: ProviderWebhookRequest): Promise<ProviderWebhookAuthResult>;
@@ -32,42 +19,18 @@ interface PixProvider {
 }
 ```
 
-No method returns raw provider model as canonical result.
+`ProviderCreatePaymentInput` may contain a canonical `splitPlan` derived from immutable PaymentSplitSnapshot. It never contains public/provider-mixed models.
 
-## 4. Create result classification
+## 4. Create result
 
-```ts
-type ProviderCreatePaymentResult =
-  | { kind: 'created'; externalId: string; pix: CanonicalPix; rawRef?: RawLogRef }
-  | { kind: 'definitive_failure'; error: CanonicalProviderError; rawRef?: RawLogRef }
-  | { kind: 'ambiguous'; reason: string; correlationRef?: string; rawRef?: RawLogRef };
-```
-
-The `ambiguous` class is mandatory. A timeout/network reset after request transmission is not automatically `definitive_failure`.
+`created | definitive_failure | ambiguous`. Timeout/reset after possible transmission is not automatically definitive failure. Ambiguous stops fallback.
 
 ## 5. Canonical statuses
+`pending | paid | expired | failed | unknown`. Unknown cannot produce financial mutation.
 
-Provider mappings target:
+## 6. Capabilities
 
-- `pending`;
-- `paid`;
-- `expired`;
-- `failed`;
-- `unknown` (internal mapping result requiring investigation, never financial mutation by itself).
-
-Unknown provider status must not be guessed into `paid`.
-
-## 6. Webhooks
-
-Each provider declares supported auth modes, e.g. token, IP, token+IP, HMAC. Authentication happens before domain mutation.
-
-Raw authenticated webhook is stored/audited with secrets masked before/alongside canonical processing according to retention/security policy.
-
-Parsing supports documented provider aliases/nesting but remains provider-specific.
-
-## 7. Provider merchant account capability
-
-Capabilities may include:
+Every adapter declares verified capabilities:
 
 ```yaml
 requires_external_merchant: boolean
@@ -75,39 +38,64 @@ supports_create_pix: true
 supports_query_pix: boolean
 supports_webhook: boolean
 supports_provider_idempotency: boolean
+supports_native_split: boolean
+supports_percentage_split: boolean
+supports_fixed_split: boolean
+requires_split_recipient_subaccount: boolean
+max_split_recipients: integer|null
 ```
 
-If external merchant is required, router checks `ProviderMerchantAccount.status == active`.
+Capabilities cannot be claimed from guesswork; documentation/fixtures/conformance evidence required.
 
-## 8. Retries/resilience
+## 7. Canonical split port
 
-Policy is per operation:
+When `supports_native_split=true`, adapter maps:
 
-- safe GET/query may use retry with bounded backoff;
-- create Pix may retry only when provider contract proves idempotency for the same provider operation;
-- otherwise ambiguous transport outcomes enter reconciliation;
-- circuit breaker may exclude definitively unhealthy providers from new selections.
+```text
+PaymentSplitSnapshot
+  → canonical recipient allocations
+  → provider recipient mapping/submerchant IDs
+  → provider request
+```
 
-## 9. Required conformance tests
+Rules:
+- provider IDs never replace canonical recipient IDs in domain state;
+- mappings must be active for environment;
+- adapter must preserve exact intended economic allocation according to provider fee semantics;
+- if provider cannot represent the snapshot exactly, provider is ineligible before send;
+- no adapter may silently drop/merge a recipient or change allocation to make request pass.
 
-Every adapter runs the same suite:
+Provider result records execution evidence separately from canonical snapshot.
 
-- valid create normalizes to canonical Pix;
-- query normalizes statuses;
+## 8. Webhooks
+Provider auth is verified before mutation. Raw authenticated payload is audited with secret masking. Parsing aliases/nesting is provider-specific.
+
+## 9. External merchant/subaccount
+If provider requires external merchant/recipient onboarding, router checks active ProviderMerchantAccount/provider recipient mappings before selection.
+
+## 10. Retry/resilience
+Safe query may retry. Create Pix may retry only with proven same-provider idempotency. Otherwise ambiguous outcome enters reconciliation.
+
+## 11. Shared conformance suite
+
+Every adapter:
+- create/query/status/error normalization;
 - provider fields do not leak;
-- errors map to canonical classes;
-- webhook auth rejects invalid source/signature/token;
-- documented webhook fixtures parse;
-- duplicate webhook processing is safe;
-- unknown status cannot become paid;
-- ambiguous timeout returns `ambiguous`;
-- provider idempotency behavior tested if claimed;
-- external merchant readiness enforced if required.
+- webhook auth/fixtures/duplicate behavior;
+- unknown != paid;
+- ambiguous timeout classification;
+- provider idempotency if claimed;
+- external merchant readiness if required.
 
-## 10. FlevoPay
+If native split claimed, also:
+- exact percentage allocation mapping;
+- fixed mode only if claimed;
+- max recipient enforcement;
+- missing recipient mapping rejected before HTTP send;
+- provider fee semantics cannot alter canonical recipient entitlement silently;
+- execution response normalized without leaking provider IDs;
+- ambiguous split create enters reconciliation;
+- no fallback to non-split-capable provider.
 
-Known reference patterns are mapped in provider-specific fixtures/spec. Public Flevo fields such as acquirer/raw status/attempts are not propagated into Swiftpay public payload.
-
-## 11. AkkadPag
-
-Adapter remains RED/blocked until complete field-level documentation and sanitized fixtures are available. No invented contract fields.
+## 12. FlevoPay/AkkadPag
+FlevoPay mapping uses only documented/fixture-backed fields. AkkadPag remains RED for unknown field-level behaviors until docs/fixtures exist. Split capability for either provider is `unknown/false-for-routing` until verified; never assume support.
