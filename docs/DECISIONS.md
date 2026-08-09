@@ -67,3 +67,9 @@ An ambiguous provider create outcome never triggers blind fallback/retry. The pa
 **Status:** PROPOSED / BLOCKED
 
 Ledger, merchant withdrawable balance and payout architecture is specified, but custody/payout activation requires the legal/commercial settlement model to be frozen first.
+
+## ADR-012 — Foundation tooling
+
+**Status:** ACCEPTED
+
+Package manager is **Bun** (workspaces, `packageManager` field, `bun.lockb`). Monorepo task orchestration is **Turborepo** (`turbo.json`). Lint/format is **ESLint (flat config + typescript-eslint) + Prettier**. The single-process preview targets **merchant-web** as the showcase surface; the root `dev` script serves it. All tools are stable/GA and introduced with justification per AGENTS.md §8. Execution plan: `PLAN_PHASE_0.md`.
